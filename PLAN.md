@@ -84,11 +84,13 @@ A hobby/learning OS kernel written in Rust, developed and tested entirely inside
 - **M2 done (2026-09-29):** `vga_buffer` module (colours, volatile cell access, wrapping, scrolling), global `WRITER` behind `spin::Mutex` + `LazyLock`, `print!`/`println!` macros, panic messages shown in red.
 - **M3 done (2026-09-29):** `port` module (`inb`/`outb` via inline asm), hand-written 16550 UART driver on COM1 (38400 8N1, FIFOs, polled send) with `serial_print!`/`serial_println!`; QEMU `-serial stdio` in bootimage run-args. Bonus: VGA hardware cursor follows text (CRT controller ports 0x3D4/0x3D5); `qemu::exit_qemu` via `isa-debug-exit` on port 0xF4 (Success → QEMU status 33). Panics are reported over serial too.
 - **M4 done (2026-09-29):** hand-built GDT in `gdt.rs` (null, ring-0 64-bit code 0x08, data 0x10, TSS 0x18), loaded with `lgdt`, CS reloaded via far return (`retfq`), SS/DS/ES reloaded, TSS loaded with `ltr`. TSS IST[0] = 20 KiB double-fault stack, for M5. Verified in QEMU monitor: CS=0008 CS64, TR=0018 TSS64, GDT entries match, no triple fault.
+- **M5 done (2026-09-29):** hand-built 256-entry IDT in `interrupts.rs` loaded with `lidt`; `extern "x86-interrupt"` handlers for #DE, #BP, #UD, #GP, #PF (reads CR2, decodes error code) and #DF on IST emergency stack. Breakpoint resumes; others report in red and halt. `crash_demo.rs` triggers each via `IGNIS_CRASH`; all 5 caught, stack overflow → double fault without reboot.
 
 ### Handy commands
 
 - Build image: `cargo bootimage`
 - Build + run in QEMU: `cargo run`
+- Crash demos: `IGNIS_CRASH=<divide|opcode|gpf|page_fault|stack_overflow> cargo run`
 - Debug: `qemu-system-x86_64 -drive format=raw,file=target/x86_64-ignis/debug/bootimage-ignis.bin -s -S` then
   `lldb target/x86_64-ignis/debug/ignis` → `gdb-remote 1234` → `breakpoint set -H -n _start` → `continue`
 

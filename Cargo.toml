@@ -17,5 +17,10 @@ panic = "abort"
 # Extra QEMU flags used by `cargo run` (via `bootimage runner`):
 #   -serial stdio        → connect COM1 to this terminal
 #   isa-debug-exit       → lets the kernel power off QEMU by writing to port 0xf4
+#   zoom-to-fit          → screen contents scale up when the window is resized
 [package.metadata.bootimage]
-run-args = ["-serial", "stdio", "-device", "isa-debug-exit,iobase=0xf4,iosize=0x01"]
+run-args = [
+    "-serial", "stdio",
+    "-device", "isa-debug-exit,iobase=0xf4,iosize=0x01",
+    "-display", "cocoa,zoom-to-fit=on",
+]

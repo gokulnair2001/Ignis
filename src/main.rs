@@ -1,7 +1,10 @@
 #![no_std] // no Rust standard library — there is no OS underneath us
 #![no_main] // no normal `main`; the bootloader jumps straight to `_start`
+#![feature(abi_x86_interrupt)] // nightly: lets Rust generate CPU exception handlers
 
+mod crash_demo;
 mod gdt;
+mod interrupts;
 mod port;
 mod qemu;
 mod serial;
@@ -26,6 +29,15 @@ pub extern "C" fn _start() -> ! {
     let (gdt_addr, df_stack) = gdt::debug_addresses();
     serial_println!("[ignis] GDT loaded at {:#x}; double-fault stack top {:#x}", gdt_addr, df_stack);
     println!("GDT + TSS loaded. Still alive: no triple fault!");
+
+    interrupts::init();
+    serial_println!("[ignis] IDT loaded");
+
+    // Trigger a harmless breakpoint exception: the handler reports it and returns.
+    unsafe { core::arch::asm!("int3") };
+    println!("Back from the breakpoint handler: exceptions work!");
+
+    crash_demo::run_from_env();
 
     hlt_loop();
 }
