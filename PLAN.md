@@ -91,11 +91,16 @@ A hobby/learning OS kernel written in Rust, developed and tested entirely inside
 - **M9 done (2026-09-30):** `allocator.rs`: 1 MiB heap at 0x4444_4444_0000 mapped page by page; hand-written linked-list allocator (address-sorted free list, first fit, 16-byte granules, merges neighbours) registered as `#[global_allocator]`; `alloc` added to build-std. Self-tests: Box/Vec/String, 10 MiB churn through 1 MiB, 900 KiB after merging, no leaks. `IGNIS_CRASH=oom` shows allocation failure → panic.
 - **M10 done (2026-09-30):** `scheduler.rs`: tasks with their own 16 KiB heap-allocated stacks, naked-asm `switch_context` (saves callee-saved regs + RSP), trampoline to start closures, round-robin ready queue, `yield_now`, finished tasks freed once off their stack. Demo: A1 B1 C1 A2 B2 C2 A3 B3 C3.
 - **M11 done (2026-09-30):** timer IRQ calls `scheduler::on_timer_tick()` after EOI, switching tasks 100×/s when preemption is on. Demo: three never-yielding tasks with 1×/2×/3× work share the CPU evenly (progress bars on row 1; finish times follow a 4:7:9 ratio because the idle main task also takes a turn). *Known limits:* no idle-task special case, no sleeping/blocking, no stack guard pages for task stacks.
+- **Phase 3 choice (2026-09-30): Option B — networking.**
+- **Networking done (2026-09-30):** `pci.rs` (config space via 0xCF8/0xCFC, bus scan, BAR0, IRQ line, bus mastering); runtime IRQ registration (`interrupts::register_irq_handler`, PIC unmask); `e1000.rs` (82540EM: uncached MMIO mapping, reset, link up, MAC from RAL/RAH, 32-entry RX/TX DMA descriptor rings, RX interrupt); `net.rs` (Ethernet, ARP with cache + 3 retries, IPv4 with header checksum, ICMP echo request/reply). Kernel pings QEMU's gateway 10.0.2.2 at boot (3/3 replies) and answers pings: `scripts/fake_peer.py` verified 4/4 replies (checksums + data). Lesson: QEMU's e1000 holds RX packets ~1 s after RCTL.EN, hence ARP retries. Real macOS `ping` via `scripts/ping-from-mac.sh` (vmnet-host, needs sudo) — not verified by the assistant.
 
 ### Handy commands
 
 - Build image: `cargo bootimage`
 - Build + run in QEMU: `cargo run`
+- Fake peer test: `python3 scripts/fake_peer.py &` then QEMU with `-netdev dgram,id=net0,local.type=inet,local.host=127.0.0.1,local.port=5555,remote.type=inet,remote.host=127.0.0.1,remote.port=5556 -device e1000,netdev=net0`
+- Ping from macOS: `./scripts/ping-from-mac.sh`, then `ping 192.168.100.2`
+- Packet capture of `cargo run`: `tcpdump -r target/net.pcap -nn -e`
 - Crash demos: `IGNIS_CRASH=<divide|opcode|gpf|page_fault|stack_overflow|oom> cargo run`
 - Debug: `qemu-system-x86_64 -drive format=raw,file=target/x86_64-ignis/debug/bootimage-ignis.bin -s -S` then
   `lldb target/x86_64-ignis/debug/ignis` → `gdb-remote 1234` → `breakpoint set -H -n _start` → `continue`

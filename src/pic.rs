@@ -67,6 +67,20 @@ pub fn init() {
     }
 }
 
+/// Stops blocking one IRQ line (clears its bit in the mask register).
+pub fn unmask(irq: u8) {
+    // SAFETY: standard PIC data ports; we only clear one mask bit.
+    unsafe {
+        if irq < 8 {
+            outb(PRIMARY_DATA, inb(PRIMARY_DATA) & !(1 << irq));
+        } else {
+            outb(SECONDARY_DATA, inb(SECONDARY_DATA) & !(1 << (irq - 8)));
+            // The secondary PIC reaches the CPU through the primary's IRQ 2.
+            outb(PRIMARY_DATA, inb(PRIMARY_DATA) & !(1 << 2));
+        }
+    }
+}
+
 /// Tells the PIC(s) we've finished handling an IRQ, so they'll send the next one.
 /// Without this, the PIC waits forever and that IRQ (and lower-priority ones) stop.
 pub fn end_of_interrupt(vector: u8) {

@@ -18,9 +18,15 @@ panic = "abort"
 #   -serial stdio        → connect COM1 to this terminal
 #   isa-debug-exit       → lets the kernel power off QEMU by writing to port 0xf4
 #   zoom-to-fit          → screen contents scale up when the window is resized
+#   -netdev user + e1000 → an Intel network card on QEMU's built-in virtual network
+#                          (we are 10.0.2.15, QEMU's virtual router is 10.0.2.2)
+#   filter-dump          → record every network frame to target/net.pcap (open in Wireshark)
 [package.metadata.bootimage]
 run-args = [
     "-serial", "stdio",
     "-device", "isa-debug-exit,iobase=0xf4,iosize=0x01",
     "-display", "cocoa,zoom-to-fit=on",
+    "-netdev", "user,id=net0",
+    "-device", "e1000,netdev=net0",
+    "-object", "filter-dump,id=dump0,netdev=net0,file=target/net.pcap",
 ]

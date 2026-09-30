@@ -6,13 +6,16 @@ extern crate alloc; // Box, Vec, String, ... backed by our heap (Milestone 9)
 
 mod allocator;
 mod crash_demo;
+mod e1000;
 mod frame_allocator;
 mod gdt;
 mod interrupts;
 mod keyboard;
 mod memory_demo;
 mod multitasking_demo;
+mod net;
 mod paging;
+mod pci;
 mod pic;
 mod port;
 mod qemu;
@@ -67,10 +70,43 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     multitasking_demo::cooperative();
     multitasking_demo::preemptive();
 
+    start_networking();
+
     crash_demo::run_from_env();
 
     println!("Type on your keyboard:");
     hlt_loop();
+}
+
+/// Phase 3: find the network card, bring it up, and ping the gateway.
+fn start_networking() {
+    pci::log_devices();
+    let (mac, ip) = match net::init() {
+        Ok(addresses) => addresses,
+        Err(error) => {
+            println!("[net] no network: {:?}", error);
+            return;
+        }
+    };
+    let link = if net::link_up() { "up" } else { "down" };
+    serial_println!("[net] e1000 ready: MAC {}, IP {}, link {}", net::MacAddr(mac), net::IpAddr(ip), link);
+    println!("[net] e1000 MAC {}, IP {}, link {}", net::MacAddr(mac), net::IpAddr(ip), link);
+
+    let gateway = net::configured_gateway();
+    let mut results = alloc::string::String::new();
+    let mut replies = 0;
+    for sequence in 1..=3 {
+        let result = match net::ping(gateway, sequence) {
+            Some(0) => { replies += 1; alloc::string::String::from("<10ms") }
+            Some(ticks) => { replies += 1; alloc::format!("{}ms", ticks * 10) }
+            None => alloc::string::String::from("lost"),
+        };
+        serial_println!("[net] ping {} seq={}: {}", net::IpAddr(gateway), sequence, result);
+        results.push_str(&result);
+        results.push(' ');
+    }
+    println!("[net] ping {}: {}/3 replies ({})", net::IpAddr(gateway), replies, results.trim_end());
+    println!("[net] listening: try `ping {}` from another machine", net::IpAddr(ip));
 }
 
 /// Called on panic: report over serial (most robust) and on screen in red, then halt.

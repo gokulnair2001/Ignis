@@ -10,6 +10,7 @@ use crate::{gdt, print, scheduler, timer};
 use core::arch::asm;
 use core::fmt;
 use core::mem::size_of;
+use core::sync::atomic::{AtomicUsize, Ordering};
 use spin::LazyLock;
 
 // CPU exception numbers we handle (0–31 are reserved for CPU exceptions).
@@ -96,6 +97,11 @@ static IDT: LazyLock<Idt> = LazyLock::new(|| {
         IdtEntry::new(primary_spurious_handler as *const (), None);
     entries[pic::SECONDARY_SPURIOUS_VECTOR as usize] =
         IdtEntry::new(secondary_spurious_handler as *const (), None);
+    // The remaining IRQ lines go to a dispatcher, so drivers found later (e.g. by the
+    // PCI scan) can claim them at runtime with `register_irq_handler`.
+    for (irq, handler) in DISPATCHED_IRQS.iter().zip(DISPATCH_HANDLERS) {
+        entries[(pic::PRIMARY_OFFSET + irq) as usize] = IdtEntry::new(handler as *const (), None);
+    }
     Idt(entries)
 });
 
@@ -294,3 +300,46 @@ extern "x86-interrupt" fn secondary_spurious_handler(_frame: InterruptStackFrame
         pic::end_of_interrupt(pic::SECONDARY_SPURIOUS_VECTOR);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Runtime-registered IRQ handlers (for devices discovered after boot, like PCI cards)
+// ---------------------------------------------------------------------------
+
+/// IRQ lines not already claimed (0 timer, 1 keyboard, 2 cascade, 7/15 spurious).
+const DISPATCHED_IRQS: [u8; 11] = [3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14];
+
+/// The driver function for each IRQ line, stored as a plain address (0 = none).
+static IRQ_HANDLERS: [AtomicUsize; 16] = [const { AtomicUsize::new(0) }; 16];
+
+/// Makes `handler` run whenever `irq` fires, and unmasks that line on the PIC.
+pub fn register_irq_handler(irq: u8, handler: fn()) {
+    assert!(DISPATCHED_IRQS.contains(&irq), "IRQ {} can't be registered", irq);
+    IRQ_HANDLERS[irq as usize].store(handler as usize, Ordering::Release);
+    pic::unmask(irq);
+}
+
+fn dispatch_irq(irq: u8) {
+    let handler = IRQ_HANDLERS[irq as usize].load(Ordering::Acquire);
+    if handler != 0 {
+        // SAFETY: only ever set from a `fn()` in `register_irq_handler`.
+        let handler: fn() = unsafe { core::mem::transmute(handler) };
+        handler();
+    }
+    pic::end_of_interrupt(pic::PRIMARY_OFFSET + irq);
+}
+
+/// An `extern "x86-interrupt"` handler can't be told which vector fired, so we
+/// generate one tiny handler per IRQ line that passes its own number along.
+macro_rules! irq_dispatchers {
+    ($($irq:literal => $name:ident),*) => {
+        $(extern "x86-interrupt" fn $name(_frame: InterruptStackFrame) { dispatch_irq($irq); })*
+        const DISPATCH_HANDLERS: [extern "x86-interrupt" fn(InterruptStackFrame); DISPATCHED_IRQS.len()] =
+            [$($name),*];
+    };
+}
+
+irq_dispatchers!(
+    3 => irq3_handler, 4 => irq4_handler, 5 => irq5_handler, 6 => irq6_handler,
+    8 => irq8_handler, 9 => irq9_handler, 10 => irq10_handler, 11 => irq11_handler,
+    12 => irq12_handler, 13 => irq13_handler, 14 => irq14_handler
+);

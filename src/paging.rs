@@ -17,6 +17,8 @@ use core::sync::atomic::{AtomicU64, Ordering};
 // Page table entry flags (low bits of each 64-bit entry).
 pub const PRESENT: u64 = 1 << 0; // entry is valid
 pub const WRITABLE: u64 = 1 << 1; // writes allowed
+pub const WRITE_THROUGH: u64 = 1 << 3; // writes go straight to memory, not just the cache
+pub const NO_CACHE: u64 = 1 << 4; // never cache this page (needed for device registers)
 pub const HUGE_PAGE: u64 = 1 << 7; // in L3/L2: maps a 1 GiB / 2 MiB page directly
 /// Bits 12–51 of an entry hold the physical address of the next table or the frame.
 const ADDRESS_MASK: u64 = 0x000f_ffff_ffff_f000;
@@ -37,7 +39,7 @@ pub fn init(physical_memory_offset: u64) {
 }
 
 /// A virtual address at which the given physical address can be accessed.
-fn phys_to_virt(physical: u64) -> *mut u8 {
+pub fn phys_to_virt(physical: u64) -> *mut u8 {
     (physical + PHYSICAL_MEMORY_OFFSET.load(Ordering::Relaxed)) as *mut u8
 }
 
