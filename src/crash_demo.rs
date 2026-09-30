@@ -18,8 +18,9 @@ pub fn run_from_env() {
         "gpf" => bad_segment(),
         "page_fault" => page_fault(),
         "stack_overflow" => stack_overflow(),
+        "oom" => out_of_memory(),
         other => crate::println!(
-            "Unknown IGNIS_CRASH={}; try divide, opcode, gpf, page_fault, stack_overflow",
+            "Unknown IGNIS_CRASH={}; try divide, opcode, gpf, page_fault, stack_overflow, oom",
             other
         ),
     }
@@ -56,4 +57,11 @@ fn stack_overflow() {
     stack_overflow();
     // Using the stack after the call stops the compiler turning the recursion into a loop.
     core::hint::black_box(());
+}
+
+/// Ask the 1 MiB heap for 2 MiB. The allocator returns null, and Rust's default
+/// "allocation failed" handler turns that into a panic.
+fn out_of_memory() {
+    let too_big: alloc::vec::Vec<u8> = alloc::vec::Vec::with_capacity(2 * 1024 * 1024);
+    core::hint::black_box(too_big);
 }

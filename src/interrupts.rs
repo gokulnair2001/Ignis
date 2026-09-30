@@ -202,8 +202,10 @@ fn fatal(name: &str, frame: &InterruptStackFrame, detail: fmt::Arguments) -> ! {
 
 extern "x86-interrupt" fn breakpoint_handler(frame: InterruptStackFrame) {
     // Harmless: report it and return, and the interrupted code carries on.
+    // Full details go to serial; the screen gets one line.
+    crate::serial_println!("EXCEPTION: BREAKPOINT (int3) - returning and carrying on\n{:?}", frame);
     WRITER.lock().set_color(Color::Yellow, Color::Black);
-    report!("EXCEPTION: BREAKPOINT (int3) - returning and carrying on\n{:?}", frame);
+    crate::println!("  EXCEPTION: BREAKPOINT at {:#x} - handled, carrying on", frame.instruction_pointer);
     WRITER.lock().set_color(Color::LightCyan, Color::Black);
 }
 

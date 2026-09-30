@@ -86,12 +86,15 @@ A hobby/learning OS kernel written in Rust, developed and tested entirely inside
 - **M4 done (2026-09-29):** hand-built GDT in `gdt.rs` (null, ring-0 64-bit code 0x08, data 0x10, TSS 0x18), loaded with `lgdt`, CS reloaded via far return (`retfq`), SS/DS/ES reloaded, TSS loaded with `ltr`. TSS IST[0] = 20 KiB double-fault stack, for M5. Verified in QEMU monitor: CS=0008 CS64, TR=0018 TSS64, GDT entries match, no triple fault.
 - **M5 done (2026-09-29):** hand-built 256-entry IDT in `interrupts.rs` loaded with `lidt`; `extern "x86-interrupt"` handlers for #DE, #BP, #UD, #GP, #PF (reads CR2, decodes error code) and #DF on IST emergency stack. Breakpoint resumes; others report in red and halt. `crash_demo.rs` triggers each via `IGNIS_CRASH`; all 5 caught, stack overflow → double fault without reboot.
 - **M6 done (2026-09-29):** 8259 PIC driver (`pic.rs`) remapped to vectors 32–47, only IRQ0/IRQ1 unmasked, EOI + spurious IRQ7/15 handling; PIT (`timer.rs`) at 100 Hz drives a status bar with uptime on row 0; PS/2 keyboard driver (`keyboard.rs`, scancode set 1, US layout, Shift/Caps Lock/Backspace) echoes typing. `without_interrupts` around print locks prevents deadlocks; `sti` enables interrupts.
+- **M7 done (2026-09-30):** `frame_allocator.rs`: reads the bootloader memory map (`map_physical_memory` feature), bitmap allocator (1 bit per 4 KiB frame, up to 4 GiB) with allocate/free/reuse. QEMU default: ~120 MiB usable = 30,943 frames.
+- **M8 done (2026-09-30):** `paging.rs`: hand-written 4-level page table walker (`translate`, handles 2 MiB/1 GiB huge pages) and `map_page` (creates missing tables from the frame allocator, `invlpg`). Demo maps a new virtual page onto the VGA frame. *Note:* the kernel is not higher-half — `bootloader` 0.9 loads it at its link address (0x200000); moving it high would mean relinking (code model + base address) or switching to `bootloader` 0.11. Revisit if/when userspace needs the lower half.
+- **M9 done (2026-09-30):** `allocator.rs`: 1 MiB heap at 0x4444_4444_0000 mapped page by page; hand-written linked-list allocator (address-sorted free list, first fit, 16-byte granules, merges neighbours) registered as `#[global_allocator]`; `alloc` added to build-std. Self-tests: Box/Vec/String, 10 MiB churn through 1 MiB, 900 KiB after merging, no leaks. `IGNIS_CRASH=oom` shows allocation failure → panic.
 
 ### Handy commands
 
 - Build image: `cargo bootimage`
 - Build + run in QEMU: `cargo run`
-- Crash demos: `IGNIS_CRASH=<divide|opcode|gpf|page_fault|stack_overflow> cargo run`
+- Crash demos: `IGNIS_CRASH=<divide|opcode|gpf|page_fault|stack_overflow|oom> cargo run`
 - Debug: `qemu-system-x86_64 -drive format=raw,file=target/x86_64-ignis/debug/bootimage-ignis.bin -s -S` then
   `lldb target/x86_64-ignis/debug/ignis` → `gdb-remote 1234` → `breakpoint set -H -n _start` → `continue`
 

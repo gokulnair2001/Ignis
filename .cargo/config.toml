@@ -1,6 +1,6 @@
 [unstable]
-# Rebuild core/compiler_builtins for our custom target; "mem" provides memcpy/memset etc.
-build-std = ["core", "compiler_builtins"]
+# Rebuild core/compiler_builtins/alloc for our custom target; "mem" provides memcpy/memset etc.
+build-std = ["core", "compiler_builtins", "alloc"]
 build-std-features = ["compiler-builtins-mem"]
 json-target-spec = true
 

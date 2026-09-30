@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bootloader = "0.9"
+bootloader = { version = "0.9", features = ["map_physical_memory"] }
 spin = { version = "0.12.3", features = ["lazy"] }
 
 # No stack unwinding on bare metal: a panic just stops the kernel.

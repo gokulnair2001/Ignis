@@ -2,10 +2,16 @@
 #![no_main] // no normal `main`; the bootloader jumps straight to `_start`
 #![feature(abi_x86_interrupt)] // nightly: lets Rust generate CPU exception handlers
 
+extern crate alloc; // Box, Vec, String, ... backed by our heap (Milestone 9)
+
+mod allocator;
 mod crash_demo;
+mod frame_allocator;
 mod gdt;
 mod interrupts;
 mod keyboard;
+mod memory_demo;
+mod paging;
 mod pic;
 mod port;
 mod qemu;
@@ -13,44 +19,51 @@ mod serial;
 mod timer;
 mod vga_buffer;
 
+use bootloader::{BootInfo, entry_point};
 use core::panic::PanicInfo;
 use vga_buffer::{Color, WRITER};
 
-/// Kernel entry point. The bootloader calls this after switching to 64-bit long mode.
-#[unsafe(no_mangle)]
-pub extern "C" fn _start() -> ! {
+// Generates `_start` for us and checks at compile time that `kernel_main` has the
+// signature the bootloader expects.
+entry_point!(kernel_main);
+
+/// Kernel entry point. The bootloader calls this after switching to 64-bit long mode,
+/// passing what it learned about the machine (e.g. the memory map).
+fn kernel_main(boot_info: &'static BootInfo) -> ! {
     WRITER.lock().clear_screen();
-
-    println!("Hello, Ignis!");
-    println!("The answer is {}, and pi is roughly {}/{}.", 42, 22, 7);
-    println!("The screen lives at {:#x}.", 0xb8000);
-
-    serial_println!("[ignis] booted; VGA text output ready");
-    serial_println!("[ignis] hello from COM1 at {:#x}", 0x3f8);
+    println!("Ignis kernel");
+    println!("[ok] VGA text screen + serial port (COM1)");
+    serial_println!("[ignis] booted; VGA + serial ready");
 
     gdt::init();
     let (gdt_addr, df_stack) = gdt::debug_addresses();
-    serial_println!("[ignis] GDT loaded at {:#x}; double-fault stack top {:#x}", gdt_addr, df_stack);
-    println!("GDT + TSS loaded. Still alive: no triple fault!");
+    serial_println!("[ignis] GDT at {:#x}; double-fault stack top {:#x}", gdt_addr, df_stack);
+    println!("[ok] GDT + TSS (emergency stack for double faults)");
 
     interrupts::init();
-    serial_println!("[ignis] IDT loaded");
+    // Trigger a harmless breakpoint exception: the handler reports it and returns.
+    unsafe { core::arch::asm!("int3") };
+    println!("[ok] IDT: CPU exceptions caught");
 
     pic::init();
     timer::init();
     timer::draw_status_bar(0);
     interrupts::enable();
-    serial_println!("[ignis] PIC remapped to {}-{}, PIT at {} Hz, interrupts on",
-        pic::PRIMARY_OFFSET, pic::SECONDARY_OFFSET + 7, timer::TICKS_PER_SECOND);
+    serial_println!("[ignis] PIC remapped, PIT at {} Hz, interrupts on", timer::TICKS_PER_SECOND);
+    println!("[ok] PIC + timer ({} Hz) + keyboard interrupts", timer::TICKS_PER_SECOND);
 
-    // Trigger a harmless breakpoint exception: the handler reports it and returns.
-    unsafe { core::arch::asm!("int3") };
-    println!("Back from the breakpoint handler: exceptions work!");
+    frame_allocator::log_memory_map(&boot_info.memory_map);
+    frame_allocator::init(&boot_info.memory_map);
+    memory_demo::frames();
+
+    paging::init(boot_info.physical_memory_offset);
+    memory_demo::paging(boot_info.physical_memory_offset, kernel_main as *const () as u64);
+
+    memory_demo::heap();
 
     crash_demo::run_from_env();
 
-    println!("Interrupts are on. Type on your keyboard:");
-
+    println!("Type on your keyboard:");
     hlt_loop();
 }
 
