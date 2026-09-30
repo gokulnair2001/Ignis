@@ -6,7 +6,7 @@
 use crate::keyboard::{self, Key};
 use crate::pic;
 use crate::vga_buffer::{Color, WRITER};
-use crate::{gdt, print, timer};
+use crate::{gdt, print, scheduler, timer};
 use core::arch::asm;
 use core::fmt;
 use core::mem::size_of;
@@ -264,7 +264,10 @@ extern "x86-interrupt" fn double_fault_handler(frame: InterruptStackFrame, _erro
 
 extern "x86-interrupt" fn timer_handler(_frame: InterruptStackFrame) {
     timer::on_tick();
+    // Acknowledge *before* possibly switching tasks: we may not come back to this
+    // handler for a while, and the PIC sends no more ticks until it gets the EOI.
     pic::end_of_interrupt(pic::TIMER_VECTOR);
+    scheduler::on_timer_tick();
 }
 
 extern "x86-interrupt" fn keyboard_handler(_frame: InterruptStackFrame) {

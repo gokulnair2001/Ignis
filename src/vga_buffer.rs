@@ -22,9 +22,10 @@ pub static WRITER: LazyLock<Mutex<Writer>> = LazyLock::new(|| {
 
 const BUFFER_HEIGHT: usize = 25;
 const BUFFER_WIDTH: usize = 80;
-/// Row 0 is a status bar; normal text scrolls in rows 1–24 below it.
+/// Row 0 is a status bar, row 1 shows task progress; normal text scrolls in rows 2–24.
 const STATUS_ROW: usize = 0;
-const FIRST_TEXT_ROW: usize = 1;
+const TASK_ROW: usize = 1;
+const FIRST_TEXT_ROW: usize = 2;
 
 /// The 16 colours VGA text mode supports.
 #[allow(dead_code)]
@@ -118,7 +119,7 @@ impl Writer {
     }
 
     pub fn clear_screen(&mut self) {
-        for row in FIRST_TEXT_ROW..BUFFER_HEIGHT {
+        for row in 0..BUFFER_HEIGHT {
             self.clear_row(row);
         }
         self.column_position = 0;
@@ -135,6 +136,14 @@ impl Writer {
             };
             self.write_cell(BUFFER_HEIGHT - 1, self.column_position, blank);
             self.update_cursor();
+        }
+    }
+
+    /// Writes `text` into the task row (row 1) starting at `col`, without moving the cursor.
+    pub fn write_task_row(&mut self, col: usize, text: &str, foreground: Color) {
+        let color_code = ColorCode::new(foreground, Color::Black);
+        for (i, byte) in text.bytes().enumerate().take(BUFFER_WIDTH.saturating_sub(col)) {
+            self.write_cell(TASK_ROW, col + i, ScreenChar { ascii_character: byte, color_code });
         }
     }
 

@@ -11,10 +11,12 @@ mod gdt;
 mod interrupts;
 mod keyboard;
 mod memory_demo;
+mod multitasking_demo;
 mod paging;
 mod pic;
 mod port;
 mod qemu;
+mod scheduler;
 mod serial;
 mod timer;
 mod vga_buffer;
@@ -60,6 +62,10 @@ fn kernel_main(boot_info: &'static BootInfo) -> ! {
     memory_demo::paging(boot_info.physical_memory_offset, kernel_main as *const () as u64);
 
     memory_demo::heap();
+
+    scheduler::init();
+    multitasking_demo::cooperative();
+    multitasking_demo::preemptive();
 
     crash_demo::run_from_env();
 

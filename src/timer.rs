@@ -30,6 +30,10 @@ pub fn init() {
     }
 }
 
+pub fn ticks() -> u64 {
+    TICKS.load(Ordering::Relaxed)
+}
+
 /// Called from the timer interrupt handler on every tick.
 pub fn on_tick() {
     let ticks = TICKS.fetch_add(1, Ordering::Relaxed) + 1;
