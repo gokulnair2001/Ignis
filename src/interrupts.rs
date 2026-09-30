@@ -260,7 +260,7 @@ extern "x86-interrupt" fn double_fault_handler(frame: InterruptStackFrame, _erro
     fatal(
         "DOUBLE FAULT (#DF)",
         &frame,
-        format_args!("  a fault happened while handling another fault (running on the IST emergency stack)"),
+        format_args!("  a fault while handling a fault; now on the IST emergency stack"),
     );
 }
 
