@@ -3,8 +3,10 @@
 //! The IDT is the CPU's "phone book": 256 entries, one per exception/interrupt number,
 //! each saying which function to jump to when that event happens.
 
-use crate::gdt;
+use crate::keyboard::{self, Key};
+use crate::pic;
 use crate::vga_buffer::{Color, WRITER};
+use crate::{gdt, print, timer};
 use core::arch::asm;
 use core::fmt;
 use core::mem::size_of;
@@ -86,6 +88,14 @@ static IDT: LazyLock<Idt> = LazyLock::new(|| {
     // so it still works when the normal stack has overflowed.
     entries[DOUBLE_FAULT] =
         IdtEntry::new(double_fault_handler as *const (), Some(gdt::DOUBLE_FAULT_IST_INDEX));
+
+    // Hardware interrupts, forwarded by the PIC at the numbers we remapped them to.
+    entries[pic::TIMER_VECTOR as usize] = IdtEntry::new(timer_handler as *const (), None);
+    entries[pic::KEYBOARD_VECTOR as usize] = IdtEntry::new(keyboard_handler as *const (), None);
+    entries[pic::PRIMARY_SPURIOUS_VECTOR as usize] =
+        IdtEntry::new(primary_spurious_handler as *const (), None);
+    entries[pic::SECONDARY_SPURIOUS_VECTOR as usize] =
+        IdtEntry::new(secondary_spurious_handler as *const (), None);
     Idt(entries)
 });
 
@@ -108,7 +118,47 @@ pub fn init() {
 }
 
 // ---------------------------------------------------------------------------
-// Handlers
+// Turning interrupts on and off
+// ---------------------------------------------------------------------------
+
+/// Bit 9 of RFLAGS: the Interrupt Flag (IF). When clear, the CPU ignores hardware interrupts.
+const INTERRUPT_FLAG: u64 = 1 << 9;
+
+/// `sti` (SeT Interrupt flag): start accepting hardware interrupts.
+pub fn enable() {
+    // SAFETY: the IDT and PIC are set up, so every interrupt that can arrive has a handler.
+    unsafe { asm!("sti", options(nomem, nostack)) };
+}
+
+/// `cli` (CLear Interrupt flag): stop accepting hardware interrupts.
+pub fn disable() {
+    // SAFETY: disabling interrupts can't break memory safety (at worst, input is delayed).
+    unsafe { asm!("cli", options(nomem, nostack)) };
+}
+
+fn are_enabled() -> bool {
+    let rflags: u64;
+    // `pushfq` pushes RFLAGS onto the stack; `pop` moves it into a register we can read.
+    unsafe { asm!("pushfq", "pop {}", out(reg) rflags, options(nomem, preserves_flags)) };
+    rflags & INTERRUPT_FLAG != 0
+}
+
+/// Runs `f` with interrupts disabled, then restores the previous state. Used around
+/// anything an interrupt handler might also lock, so the two can't deadlock.
+pub fn without_interrupts<R>(f: impl FnOnce() -> R) -> R {
+    let were_enabled = are_enabled();
+    if were_enabled {
+        disable();
+    }
+    let result = f();
+    if were_enabled {
+        enable();
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
+// Exception handlers
 // ---------------------------------------------------------------------------
 
 /// What the CPU pushes onto the stack before calling a handler.
@@ -204,4 +254,38 @@ extern "x86-interrupt" fn double_fault_handler(frame: InterruptStackFrame, _erro
         &frame,
         format_args!("  a fault happened while handling another fault (running on the IST emergency stack)"),
     );
+}
+
+// ---------------------------------------------------------------------------
+// Hardware interrupt (IRQ) handlers
+// ---------------------------------------------------------------------------
+
+extern "x86-interrupt" fn timer_handler(_frame: InterruptStackFrame) {
+    timer::on_tick();
+    pic::end_of_interrupt(pic::TIMER_VECTOR);
+}
+
+extern "x86-interrupt" fn keyboard_handler(_frame: InterruptStackFrame) {
+    match keyboard::read_key() {
+        Some(Key::Char('\t')) => print!("    "),
+        Some(Key::Char(c)) => print!("{}", c),
+        Some(Key::Backspace) => WRITER.lock().backspace(),
+        None => {}
+    }
+    pic::end_of_interrupt(pic::KEYBOARD_VECTOR);
+}
+
+extern "x86-interrupt" fn primary_spurious_handler(_frame: InterruptStackFrame) {
+    // A spurious IRQ 7 must NOT get an end-of-interrupt: the PIC isn't expecting one.
+    if !pic::is_spurious(pic::PRIMARY_SPURIOUS_VECTOR) {
+        pic::end_of_interrupt(pic::PRIMARY_SPURIOUS_VECTOR);
+    }
+}
+
+extern "x86-interrupt" fn secondary_spurious_handler(_frame: InterruptStackFrame) {
+    if pic::is_spurious(pic::SECONDARY_SPURIOUS_VECTOR) {
+        pic::end_of_spurious_secondary();
+    } else {
+        pic::end_of_interrupt(pic::SECONDARY_SPURIOUS_VECTOR);
+    }
 }

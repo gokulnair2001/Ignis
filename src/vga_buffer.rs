@@ -22,6 +22,9 @@ pub static WRITER: LazyLock<Mutex<Writer>> = LazyLock::new(|| {
 
 const BUFFER_HEIGHT: usize = 25;
 const BUFFER_WIDTH: usize = 80;
+/// Row 0 is a status bar; normal text scrolls in rows 1–24 below it.
+const STATUS_ROW: usize = 0;
+const FIRST_TEXT_ROW: usize = 1;
 
 /// The 16 colours VGA text mode supports.
 #[allow(dead_code)]
@@ -115,11 +118,36 @@ impl Writer {
     }
 
     pub fn clear_screen(&mut self) {
-        for row in 0..BUFFER_HEIGHT {
+        for row in FIRST_TEXT_ROW..BUFFER_HEIGHT {
             self.clear_row(row);
         }
         self.column_position = 0;
         self.update_cursor();
+    }
+
+    /// Erases the character before the cursor (only on the current line).
+    pub fn backspace(&mut self) {
+        if self.column_position > 0 {
+            self.column_position -= 1;
+            let blank = ScreenChar {
+                ascii_character: b' ',
+                color_code: self.color_code,
+            };
+            self.write_cell(BUFFER_HEIGHT - 1, self.column_position, blank);
+            self.update_cursor();
+        }
+    }
+
+    /// Replaces the status bar (row 0) with `text`, in inverted colours.
+    /// Doesn't move the cursor or disturb the text below.
+    pub fn write_status_bar(&mut self, text: &str) {
+        let color_code = ColorCode::new(Color::Black, Color::LightGray);
+        let mut bytes = text.bytes();
+        for col in 0..BUFFER_WIDTH {
+            let byte = bytes.next().unwrap_or(b' ');
+            let ascii_character = if (0x20..=0x7e).contains(&byte) { byte } else { 0xfe };
+            self.write_cell(STATUS_ROW, col, ScreenChar { ascii_character, color_code });
+        }
     }
 
     /// Moves the blinking hardware cursor to where the next character will go.
@@ -141,9 +169,10 @@ impl Writer {
         }
     }
 
-    /// Moves every row up by one (the top row is lost) and starts a fresh bottom row.
+    /// Moves every text row up by one (the top text row is lost) and starts a fresh
+    /// bottom row. The status bar stays put.
     fn new_line(&mut self) {
-        for row in 1..BUFFER_HEIGHT {
+        for row in FIRST_TEXT_ROW + 1..BUFFER_HEIGHT {
             for col in 0..BUFFER_WIDTH {
                 let character = self.read_cell(row, col);
                 self.write_cell(row - 1, col, character);
@@ -199,5 +228,9 @@ macro_rules! println {
 #[doc(hidden)]
 pub fn _print(args: fmt::Arguments) {
     use core::fmt::Write;
-    WRITER.lock().write_fmt(args).unwrap();
+    // Interrupts stay off while we hold the lock. Otherwise an interrupt handler that
+    // prints could fire mid-print and wait forever for the lock we're holding (deadlock).
+    crate::interrupts::without_interrupts(|| {
+        WRITER.lock().write_fmt(args).unwrap();
+    });
 }

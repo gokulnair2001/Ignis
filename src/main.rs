@@ -5,9 +5,12 @@
 mod crash_demo;
 mod gdt;
 mod interrupts;
+mod keyboard;
+mod pic;
 mod port;
 mod qemu;
 mod serial;
+mod timer;
 mod vga_buffer;
 
 use core::panic::PanicInfo;
@@ -33,11 +36,20 @@ pub extern "C" fn _start() -> ! {
     interrupts::init();
     serial_println!("[ignis] IDT loaded");
 
+    pic::init();
+    timer::init();
+    timer::draw_status_bar(0);
+    interrupts::enable();
+    serial_println!("[ignis] PIC remapped to {}-{}, PIT at {} Hz, interrupts on",
+        pic::PRIMARY_OFFSET, pic::SECONDARY_OFFSET + 7, timer::TICKS_PER_SECOND);
+
     // Trigger a harmless breakpoint exception: the handler reports it and returns.
     unsafe { core::arch::asm!("int3") };
     println!("Back from the breakpoint handler: exceptions work!");
 
     crash_demo::run_from_env();
+
+    println!("Interrupts are on. Type on your keyboard:");
 
     hlt_loop();
 }
@@ -45,6 +57,8 @@ pub extern "C" fn _start() -> ! {
 /// Called on panic: report over serial (most robust) and on screen in red, then halt.
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
+    // No more interrupts: a timer tick must not grab the screen lock while we report.
+    interrupts::disable();
     serial_println!("[ignis] KERNEL PANIC: {}", info);
     WRITER.lock().set_color(Color::LightRed, Color::Black);
     println!("KERNEL PANIC: {}", info);
